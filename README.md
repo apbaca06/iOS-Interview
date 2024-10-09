@@ -3912,3 +3912,1615 @@ To handle **certificate validation errors** in **URLSession** and override the d
 
 Each of these approaches comes with trade-offs between **convenience** and **security**. In a production environment, it is best to use **SSL pinning** or allow **default validation** to ensure that communication with servers remains secure.
 </details>
+
+## Unit Test
+
+### Basics
+
+<details>
+  <summary>How do you handle dependencies when writing unit tests?</summary>
+  Handling dependencies effectively is essential when writing unit tests to ensure that each unit is tested **in isolation** without interference from other parts of the system. Here are several strategies to handle dependencies when writing unit tests:
+
+### 1. Dependency Injection
+**Dependency Injection** (DI) is the practice of **providing dependencies** to a class rather than letting the class create them itself. This decouples the class from its dependencies and makes testing easier.
+
+- **Constructor Injection**: Pass dependencies through the constructor.
+- **Property Injection**: Assign dependencies to public properties.
+
+**Example**:
+```swift
+// Dependency
+protocol NetworkService {
+    func fetchData(completion: @escaping (Data?, Error?) -> Void)
+}
+
+// Production implementation
+class RealNetworkService: NetworkService {
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        // Actual network call
+    }
+}
+
+// Class that depends on the network service
+class DataManager {
+    private let networkService: NetworkService
+
+    init(networkService: NetworkService) {
+        self.networkService = networkService
+    }
+
+    func loadData() {
+        networkService.fetchData { data, error in
+            // Handle data or error
+        }
+    }
+}
+
+// Unit test
+class DataManagerTests: XCTestCase {
+    class MockNetworkService: NetworkService {
+        func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+            // Return mock data
+            let mockData = Data("mock response".utf8)
+            completion(mockData, nil)
+        }
+    }
+
+    func testLoadData() {
+        let mockNetworkService = MockNetworkService()
+        let dataManager = DataManager(networkService: mockNetworkService)
+
+        // Execute and verify behavior
+        dataManager.loadData()
+        // Add assertions as needed
+    }
+}
+```
+- **Advantages**:
+  - **Testability**: Dependencies can be swapped out with mocks or stubs, making the code easier to test.
+  - **Loose Coupling**: The class does not directly depend on concrete implementations.
+
+### 2. Use of Protocols and Abstraction
+Using **protocols** to define dependencies helps decouple classes and allows you to inject **mock implementations** for testing purposes.
+
+- **Define a protocol** for each dependency and have both the real and mock implementations conform to it.
+- This allows you to **easily substitute** the dependency in unit tests.
+
+**Example**:
+```swift
+protocol Storage {
+    func save(data: String)
+    func fetch() -> String
+}
+
+class UserDefaultsStorage: Storage {
+    func save(data: String) {
+        UserDefaults.standard.set(data, forKey: "dataKey")
+    }
+
+    func fetch() -> String {
+        return UserDefaults.standard.string(forKey: "dataKey") ?? ""
+    }
+}
+
+class MyService {
+    private let storage: Storage
+
+    init(storage: Storage) {
+        self.storage = storage
+    }
+
+    func saveData(data: String) {
+        storage.save(data: data)
+    }
+}
+
+// Unit Test with a Mock
+class MockStorage: Storage {
+    var savedData: String?
+
+    func save(data: String) {
+        savedData = data
+    }
+
+    func fetch() -> String {
+        return savedData ?? ""
+    }
+}
+
+func testSaveData() {
+    let mockStorage = MockStorage()
+    let service = MyService(storage: mockStorage)
+
+    service.saveData(data: "Test Data")
+    XCTAssertEqual(mockStorage.savedData, "Test Data")
+}
+```
+- **Protocols** allow you to define **behavior** without binding to specific implementations, making unit testing and dependency replacement easier.
+
+### 3. Mocking Dependencies
+**Mocking** is the practice of replacing a real implementation with a fake one to simulate different scenarios. A mock can mimic the behavior of real dependencies without the need for external interactions.
+
+- Use a **mocking library** like **Cuckoo** or **Mockingbird** to generate mocks automatically.
+- Create your own mocks manually by conforming to protocols.
+
+**Example Using a Manual Mock**:
+```swift
+class MockNetworkClient: NetworkService {
+    var fetchDataCalled = false
+    var dataToReturn: Data?
+    var errorToReturn: Error?
+
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        fetchDataCalled = true
+        completion(dataToReturn, errorToReturn)
+    }
+}
+
+func testNetworkClientFetchData() {
+    let mockClient = MockNetworkClient()
+    mockClient.dataToReturn = Data("mock data".utf8)
+    
+    let dataManager = DataManager(networkService: mockClient)
+    dataManager.loadData()
+
+    XCTAssertTrue(mockClient.fetchDataCalled)
+}
+```
+- **MockNetworkClient** replaces the real network client during tests, allowing you to control responses and track if methods were called.
+
+### 4. Stubbing Dependencies
+**Stubs** are another way to handle dependencies. Unlike mocks, stubs do not track interactions but simply provide **predefined data** for specific methods.
+
+**Example Using a Stub**:
+```swift
+class StubNetworkService: NetworkService {
+    var dataToReturn: Data?
+
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        completion(dataToReturn, nil)
+    }
+}
+
+func testLoadDataWithStub() {
+    let stubService = StubNetworkService()
+    stubService.dataToReturn = Data("stubbed data".utf8)
+
+    let dataManager = DataManager(networkService: stubService)
+    dataManager.loadData()
+    
+    // Add assertions to verify the behavior
+}
+```
+- Stubs are simple implementations that **return predefined data** without adding complexity like tracking calls.
+
+### 5. Spying on Dependencies
+**Spies** are used to verify how dependencies were called. They record information about method invocations, such as the **number of times** a method was called and the **parameters** passed.
+
+**Example Using a Spy**:
+```swift
+class SpyNetworkService: NetworkService {
+    var fetchDataCallCount = 0
+
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        fetchDataCallCount += 1
+        completion(nil, nil)
+    }
+}
+
+func testNetworkServiceSpy() {
+    let spyService = SpyNetworkService()
+    let dataManager = DataManager(networkService: spyService)
+
+    dataManager.loadData()
+    XCTAssertEqual(spyService.fetchDataCallCount, 1, "fetchData should be called once")
+}
+```
+- **Spy** allows you to test **interactions**—such as how many times a dependency was called or with what parameters.
+
+### 6. Using Fake Dependencies
+A **Fake** is a working implementation of a dependency but with limited functionality, mainly for testing purposes. Fakes are useful when you need a complete in-memory replacement of a service, like a fake database.
+
+**Example Using a Fake Database**:
+```swift
+protocol Database {
+    func save(data: String)
+    func retrieve() -> [String]
+}
+
+class FakeDatabase: Database {
+    private var storage: [String] = []
+
+    func save(data: String) {
+        storage.append(data)
+    }
+
+    func retrieve() -> [String] {
+        return storage
+    }
+}
+
+func testSaveDataInFakeDatabase() {
+    let fakeDatabase = FakeDatabase()
+    let service = MyService(storage: fakeDatabase)
+
+    service.saveData(data: "Test Data")
+    XCTAssertEqual(fakeDatabase.retrieve().count, 1)
+    XCTAssertEqual(fakeDatabase.retrieve().first, "Test Data")
+}
+```
+- **FakeDatabase** acts as a simplified in-memory database that you can use to test without using an actual database.
+
+### 7. Using URLProtocol for Mocking Network Requests
+When dealing with network requests using `URLSession`, you can use **URLProtocol** to intercept requests and provide **mock responses**.
+
+**Example Using `URLProtocol`**:
+```swift
+class MockURLProtocol: URLProtocol {
+    static var mockData: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        return true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+
+    override func startLoading() {
+        if let data = MockURLProtocol.mockData {
+            client?.urlProtocol(self, didLoad: data)
+        }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+// Usage in a Unit Test
+func testNetworkRequestWithURLProtocol() {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+
+    MockURLProtocol.mockData = Data("mock response".utf8)
+
+    let networkClient = NetworkClient(session: session)
+    // Execute the request and verify the result
+}
+```
+- **URLProtocol** allows intercepting network requests and returning **mock responses**, which is very useful for testing networking code.
+
+### Summary of Handling Dependencies in Unit Tests
+1. **Dependency Injection**: Inject dependencies via constructor or properties, allowing you to substitute real dependencies with mocks or stubs.
+2. **Use of Protocols**: Define interfaces using protocols, and have real and mock implementations conform to these protocols.
+3. **Mocking**: Use mocks to simulate dependencies and verify behavior.
+4. **Stubbing**: Use stubs to provide **fixed responses** without verifying the interactions.
+5. **Spies**: Use spies to **track method calls** and verify interactions with dependencies.
+6. **Fake Dependencies**: Use fakes as lightweight, in-memory alternatives to real services.
+7. **URLProtocol**: Use `URLProtocol` to **intercept and mock network requests**, useful for testing networking code without real server calls.
+
+These strategies help ensure that unit tests are isolated, **repeatable**, and **independent** of external systems, leading to more reliable and maintainable test suites.
+</details>
+
+<details>
+  <summary>Can you explain the Arrange-Act-Assert (AAA) pattern in unit testing?</summary>
+  The **Arrange-Act-Assert (AAA) pattern** is a common structure used for writing clear and organized unit tests. It provides a consistent approach to setting up, executing, and validating tests, which helps improve readability and maintainability. Here's a breakdown of each phase of the **AAA** pattern:
+
+### 1. Arrange
+In the **Arrange** step, you prepare everything needed to execute the test. This often involves setting up the **objects**, **dependencies**, and **input data** required to perform the operation you want to test.
+
+- Initialize the system under test (**SUT**).
+- Create any **mock** or **stub** dependencies.
+- Set up the required **input** values.
+
+**Example**:
+```swift
+// Arrange
+let calculator = Calculator()
+let a = 2
+let b = 3
+```
+- In this step, you set up all the necessary **variables**, **dependencies**, and the **object** being tested.
+
+### 2. Act
+In the **Act** step, you **execute** the functionality that you are testing. This is where the actual test action takes place, such as calling a method or triggering a behavior.
+
+- Call the **method** or **function** on the **SUT**.
+- Perform the **operation** you are trying to verify.
+
+**Example**:
+```swift
+// Act
+let result = calculator.add(a: a, b: b)
+```
+- In this step, you call the method being tested (in this case, `add(a:b:)`).
+
+### 3. Assert
+In the **Assert** step, you verify the result of the action. You check whether the **actual output** matches the **expected output**. If the assertion fails, the test will fail.
+
+- Use assertions to validate **expected outcomes**.
+- Compare **expected values** with **actual results**.
+
+**Example**:
+```swift
+// Assert
+XCTAssertEqual(result, 5, "Expected 2 + 3 to equal 5")
+```
+- Here, you check if the result is equal to the expected value (`5`). If it's not, the test fails and provides an error message.
+
+### Complete Example of AAA Pattern in Unit Testing
+Putting all three steps together in a single unit test:
+
+```swift
+import XCTest
+
+class CalculatorTests: XCTestCase {
+    func testAddition() {
+        // Arrange
+        let calculator = Calculator()
+        let a = 2
+        let b = 3
+
+        // Act
+        let result = calculator.add(a: a, b: b)
+
+        // Assert
+        XCTAssertEqual(result, 5, "Expected 2 + 3 to equal 5")
+    }
+}
+```
+
+### Benefits of the AAA Pattern
+1. **Improved Readability**: The **AAA pattern** helps break the test into clearly defined sections, making it easy to read and understand.
+2. **Consistency**: Following a consistent pattern ensures that all tests are structured in a similar way, which reduces the cognitive load when reading through multiple tests.
+3. **Separation of Concerns**: Each step has a specific responsibility, making it easy to understand the purpose of each part of the test. It also makes it easier to identify what went wrong if a test fails.
+
+### Example for Testing with Dependencies
+If a function has dependencies, such as an API service, the **Arrange-Act-Assert** pattern can help organize the test by ensuring the dependency is mocked before calling the method.
+
+```swift
+import XCTest
+
+// Assuming we have a WeatherService class that depends on a NetworkService
+class MockNetworkService: NetworkService {
+    var mockData: Data?
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        completion(mockData, nil)
+    }
+}
+
+class WeatherServiceTests: XCTestCase {
+    func testFetchWeatherData() {
+        // Arrange
+        let mockNetworkService = MockNetworkService()
+        mockNetworkService.mockData = Data("""
+        {
+            "temperature": 22,
+            "condition": "Sunny"
+        }
+        """.utf8)
+        let weatherService = WeatherService(networkService: mockNetworkService)
+
+        // Act
+        var fetchedWeather: Weather?
+        weatherService.fetchWeather { weather in
+            fetchedWeather = weather
+        }
+
+        // Assert
+        XCTAssertNotNil(fetchedWeather)
+        XCTAssertEqual(fetchedWeather?.temperature, 22)
+        XCTAssertEqual(fetchedWeather?.condition, "Sunny")
+    }
+}
+```
+
+### Summary of the AAA Pattern
+- **Arrange**: Set up the environment, create objects, and configure necessary dependencies.
+- **Act**: Execute the function or method that you are testing.
+- **Assert**: Verify that the result matches the expected outcome.
+
+The **AAA pattern** brings consistency and readability to unit tests, making it easier for developers to maintain and understand the tests. It helps separate different responsibilities of the test, leading to **cleaner, more modular, and more maintainable** test cases.
+</details>
+
+<details>
+  <summary>What are the characteristics of a good unit test?</summary>
+  A good unit test is one that effectively verifies the correctness of the code, is reliable, easy to understand, and provides value to the development process. Here are the key characteristics of a **good unit test**:
+
+### 1. **Fast**
+- **Speed** is crucial for unit tests since they are run frequently during the development process. A good unit test should execute quickly, allowing developers to run the entire test suite frequently without any significant time delay.
+- Unit tests should not involve external resources like databases, network calls, or file systems, as these tend to slow down the test execution.
+
+### 2. **Isolated and Independent**
+- A unit test should test only one **specific unit** of code (e.g., a method or function) and be **completely independent** from other unit tests.
+- **Isolation** ensures that the test focuses solely on the code under test and that it has no dependencies on other parts of the system, such as databases, APIs, or other modules. This makes the tests reliable and prevents **cascading failures**.
+- **Mocks** and **stubs** should be used to handle dependencies, allowing the unit under test to operate in isolation.
+
+### 3. **Deterministic and Reliable**
+- A good unit test should be **deterministic**, meaning that it produces the same result every time it runs under the same conditions.
+- It should not be affected by **external factors** such as system time, network conditions, or the presence of other tests. Flaky tests, which sometimes pass and sometimes fail, are an indication that the unit test is not reliable.
+
+### 4. **Readable and Understandable**
+- A unit test should be **easy to read and understand**. This means that anyone looking at the test should be able to understand what it is testing and why.
+- Using a consistent structure like **Arrange-Act-Assert (AAA)** can make tests easier to follow.
+- A good unit test has a **descriptive name** that clearly indicates the purpose of the test. For example, `testAddTwoPositiveNumbers_ShouldReturnCorrectSum()` is more informative than `testAdd()`.
+
+### 5. **Automated and Repeatable**
+- Unit tests should be **fully automated** so that they can be run frequently and easily, ideally as part of a **continuous integration** (CI) pipeline.
+- They should be **repeatable**, meaning that they can run multiple times in succession and still produce the same result.
+
+### 6. **Minimal Maintenance**
+- Good unit tests should require **minimal maintenance** when the code changes. They should be robust against changes that do not affect the behavior of the unit being tested.
+- This means that unit tests should **avoid testing implementation details** and focus on the **public interface** and **observable behavior** of the unit.
+
+### 7. **Single Responsibility**
+- Each unit test should have a **single responsibility** and test one specific behavior of the code.
+- If a test fails, it should be **immediately clear** what part of the code is broken. This helps quickly diagnose and resolve issues.
+
+### 8. **Self-Contained and No Side Effects**
+- Unit tests should be **self-contained**—they should not depend on external systems or leave any changes behind after running.
+- They should also not modify shared states or have **side effects** that might affect other tests. This ensures that tests can be run independently without any order dependency.
+
+### 9. **Assert Only One Logical Outcome**
+- A good unit test typically **asserts only one logical outcome**. Multiple assertions are allowed if they are related to the same logical concept.
+- This practice ensures that when a test fails, the failure message is clear and precise, helping developers diagnose the specific issue.
+
+**Example**:
+```swift
+func testAddTwoPositiveNumbers_ShouldReturnCorrectSum() {
+    // Arrange
+    let calculator = Calculator()
+
+    // Act
+    let result = calculator.add(a: 2, b: 3)
+
+    // Assert
+    XCTAssertEqual(result, 5, "Expected 2 + 3 to equal 5")
+}
+```
+- In this example, there is a single assertion (`XCTAssertEqual`) that checks the outcome of adding two positive numbers.
+
+### 10. **Readable Failure Messages**
+- The **assertion messages** should provide **useful information** when the test fails. This makes it easier for developers to identify the issue.
+- Instead of providing a generic message like "Test failed," the test should include a description of the expected behavior and the actual result.
+
+### 11. **Tests Edge Cases and Typical Scenarios**
+- A good unit test should not only test **happy paths** but also cover **edge cases** and **error conditions** to ensure the robustness of the unit.
+- Examples of edge cases include testing with **negative numbers**, **zero**, **empty inputs**, or **null values**.
+
+**Example**:
+```swift
+func testAdd_WhenAddingZero_ShouldReturnSameNumber() {
+    // Arrange
+    let calculator = Calculator()
+
+    // Act
+    let result = calculator.add(a: 5, b: 0)
+
+    // Assert
+    XCTAssertEqual(result, 5, "Expected 5 + 0 to equal 5")
+}
+```
+- This test covers an **edge case** where one of the inputs is zero.
+
+### 12. **Avoids Testing Too Much Logic**
+- Unit tests should avoid including complex logic within the test itself. If the test has complicated loops or conditions, there's a higher chance that the test itself may have bugs.
+- Tests should be as **simple** and **straightforward** as possible to minimize the risk of introducing errors in the test code.
+
+### 13. **Consistent and Predictable Setup**
+- **Set up** and **tear down** processes should be consistent to ensure that each test starts with a predictable state.
+- Methods like `setUp()` and `tearDown()` can be used to initialize or clean up resources to ensure a consistent test environment.
+
+**Example**:
+```swift
+class CalculatorTests: XCTestCase {
+    var calculator: Calculator!
+
+    override func setUp() {
+        super.setUp()
+        calculator = Calculator() // Arrange
+    }
+
+    override func tearDown() {
+        calculator = nil
+        super.tearDown()
+    }
+
+    func testAddition() {
+        // Act
+        let result = calculator.add(a: 2, b: 3)
+        
+        // Assert
+        XCTAssertEqual(result, 5, "Expected 2 + 3 to equal 5")
+    }
+}
+```
+- `setUp()` ensures a consistent setup for each test, and `tearDown()` helps clean up resources.
+
+### Summary of Characteristics of a Good Unit Test
+1. **Fast**: Executes quickly to be run frequently.
+2. **Isolated and Independent**: Tests only one unit without external dependencies.
+3. **Deterministic and Reliable**: Always produces the same result under the same conditions.
+4. **Readable and Understandable**: Structured and named clearly to indicate its purpose.
+5. **Automated and Repeatable**: Can run automatically as part of the CI process.
+6. **Minimal Maintenance**: Resilient to changes in the underlying implementation.
+7. **Single Responsibility**: Tests only one specific behavior.
+8. **Self-Contained and No Side Effects**: Leaves no side effects and doesn't depend on external systems.
+9. **Assert Only One Logical Outcome**: Ensures the focus is on a single logical behavior.
+10. **Readable Failure Messages**: Provides meaningful failure messages for easy debugging.
+11. **Tests Edge Cases and Typical Scenarios**: Covers both common and edge cases.
+12. **Avoids Testing Too Much Logic**: The test itself is straightforward and simple.
+13. **Consistent and Predictable Setup**: Uses proper setup and teardown to maintain consistent state.
+
+By ensuring unit tests have these characteristics, they become a valuable asset for maintaining code quality and ensuring that changes in the codebase do not introduce unexpected bugs.
+</details>
+
+<details>
+  <summary>How do you decide which parts of your code need unit tests?</summary>
+  Deciding which parts of your code need **unit tests** is a strategic process that helps ensure that your testing efforts are both effective and efficient. To make informed decisions about which code to unit test, consider the following factors:
+
+### 1. **Core Business Logic**
+- **Priority** should be given to code that handles the core **business rules** or functionality of the application. This is where most of the application logic resides, and errors can have significant impacts.
+- Example: Calculations, validation rules, processing algorithms, and data transformation logic are crucial parts that must be thoroughly tested.
+
+**Example**:
+- A function that calculates **discounts** for a shopping cart should have unit tests to verify the calculation is correct for various scenarios (e.g., different user types, cart totals, discount combinations).
+
+### 2. **Complex Code**
+- **Complex logic** is more prone to errors, so code that involves **conditional statements**, **loops**, **recursion**, or **mathematical calculations** should be unit tested.
+- Complex functions are harder to reason about, which means bugs are more likely to occur, and a unit test can help validate edge cases.
+
+**Example**:
+- A method that performs **complex conditional logic** to decide on a user's permissions based on multiple criteria should be unit tested to verify all possible branches of the logic.
+
+### 3. **Code with Multiple Edge Cases**
+- Code that has **many edge cases** or can accept a wide range of inputs should be tested extensively to ensure it behaves correctly for **valid**, **invalid**, **boundary**, and **edge** cases.
+- This helps ensure that unusual or unexpected inputs do not break the logic.
+
+**Example**:
+- A function that **parses user input** should be tested for all possible edge cases, such as empty strings, invalid characters, extremely long input, and valid input variations.
+
+### 4. **Public API or Methods**
+- Any function or method that is part of the **public API** or exposed to other parts of the application should have unit tests. These are critical as they serve as the **entry points** into your module.
+- They have external consumers, and their stability is essential for the correct behavior of the rest of the application.
+
+**Example**:
+- **Public service methods** like `addUser()`, `updateProfile()`, or `fetchData()` should be tested because they are used by other classes and are part of the module's **interface**.
+
+### 5. **Code That Is Difficult or Costly to Debug**
+- Code that would be **difficult** to diagnose if broken, or code that could have **significant impacts** if incorrect, should have unit tests.
+- This helps catch issues early before they reach production, minimizing debugging time and avoiding costly bug-fixing efforts.
+
+**Example**:
+- Code that **interacts with third-party APIs** or code that processes **financial transactions** should be well-tested to avoid expensive debugging or incorrect results.
+
+### 6. **Code That Tends to Change Often**
+- Code that is **frequently modified** should be unit tested to ensure that changes do not introduce regressions. Writing tests for code that changes often makes it easier to detect when modifications break existing functionality.
+- If a feature evolves rapidly, automated tests provide a safety net to validate that existing functionality works as expected after each change.
+
+**Example**:
+- Features that are **under active development**, like evolving UI components or business logic that changes due to frequent updates, should be covered with unit tests.
+
+### 7. **Code That Has Dependencies**
+- Code that **interacts with external dependencies** (like databases, web services, or other systems) should be unit tested by **mocking** those dependencies.
+- Testing the internal logic of methods that depend on external systems helps validate the correct behavior in **isolation**, without relying on the availability or reliability of the external system.
+
+**Example**:
+- Methods that **process data** returned by an API call should be unit tested with mocked API responses to ensure that the data handling is done correctly.
+
+### 8. **Critical Code Paths**
+- **Critical code paths** or **high-risk areas**—such as user authentication, data security, and financial operations—must be tested thoroughly because they are vital to the functioning of the app.
+- Bugs in these areas can have severe consequences, such as data breaches or financial losses.
+
+**Example**:
+- Code that **authenticates users** or **authorizes access** to resources must be covered with tests to verify that unauthorized access is not allowed and legitimate users are granted access appropriately.
+
+### 9. **Bug Fixes and Regression Testing**
+- When a **bug** is identified, write a unit test that **replicates the bug** and verify that the test fails. Then fix the bug and ensure that the test passes. This helps prevent **regressions** in the future.
+- Tests should be added to ensure that the same issue **cannot reoccur** without failing a test.
+
+**Example**:
+- If a bug was found in a function that calculates **tax amounts**, write a unit test to replicate the scenario and ensure that the bug doesn’t reoccur in future versions of the code.
+
+### 10. **Reusable Components**
+- **Reusable** or **shared code** that is used across multiple parts of the application should be well-tested. Ensuring the correctness of shared components can significantly reduce the likelihood of issues in other parts of the system.
+- Any **utility function** or **helper method** that is reused in various modules should have unit tests.
+
+**Example**:
+- Utility functions like **string formatting helpers**, **date utilities**, and **mathematical functions** are good candidates for unit testing to ensure their reliability wherever they are used.
+
+### 11. **Pure Functions**
+- **Pure functions** are ideal for unit testing because they always produce the same output given the same input and have no side effects. They are often foundational pieces of business logic.
+- Testing pure functions is straightforward since there are no dependencies or side effects to mock or isolate.
+
+**Example**:
+- A pure function that calculates the **total price** after applying a discount should be unit tested to ensure that the result is always correct given specific inputs.
+
+### When You Might Skip Unit Testing
+While unit tests are highly beneficial, there are scenarios where you might **skip unit testing** or use **other testing methods**:
+
+1. **Simple Getters and Setters**:
+   - **Plain getter and setter methods** often do not require unit testing, as they usually contain trivial code without logic.
+   
+2. **UI Code**:
+   - Code that primarily deals with **UI rendering** or **layout** may be better tested using **UI testing** frameworks rather than unit tests.
+
+3. **Third-Party Libraries**:
+   - You do not need to write unit tests for **third-party libraries**. Instead, focus on testing how your code interacts with those libraries.
+
+4. **Generated Code**:
+   - **Auto-generated code** is generally not manually tested since it is generated by a tool, and testing would provide limited value.
+
+### Summary of Factors for Deciding Which Code to Unit Test
+1. **Core Business Logic**: Ensure the correctness of your business rules.
+2. **Complex Code**: Focus on code with intricate logic, loops, or conditionals.
+3. **Code with Multiple Edge Cases**: Ensure robust handling of a variety of inputs.
+4. **Public API or Methods**: Test all exposed entry points for your module.
+5. **Code That Is Difficult or Costly to Debug**: Ensure critical code paths work correctly.
+6. **Code That Tends to Change Often**: Test frequently changing code to avoid regressions.
+7. **Code That Has Dependencies**: Use mocks to isolate dependencies and test internal logic.
+8. **Critical Code Paths**: Test crucial areas like authentication and data processing.
+9. **Bug Fixes and Regression Testing**: Write tests for fixed bugs to prevent future regressions.
+10. **Reusable Components**: Test utility functions and reusable modules thoroughly.
+11. **Pure Functions**: Test pure functions since they are predictable and easy to verify.
+
+By focusing on these areas, you can create a comprehensive unit test suite that effectively ensures the **correctness** and **stability** of your application, while still being manageable in terms of the effort and resources required for test creation and maintenance.
+</details>
+
+### Mocking, Stubbing, and Spying
+<details>
+  <summary>What is mocking, and why is it used in unit testing?</summary>
+  **Mocking** is a technique used in **unit testing** where you replace a real object with a **mock object** to simulate the behavior of complex, external dependencies. A **mock object** is a **test double** that imitates the behavior of real objects in controlled ways, providing **predefined responses** and **tracking interactions** during the test. Mocking helps in isolating the **unit under test**, allowing you to focus only on the functionality being tested, without relying on real dependencies.
+
+### Why Is Mocking Used in Unit Testing?
+Mocking is used to:
+1. **Isolate the Unit Under Test**: Unit testing aims to verify the behavior of a single, isolated unit of code. If that code has dependencies, using mocks allows the test to focus solely on the unit without being influenced by external factors.
+2. **Replace Complex Dependencies**: Real dependencies can be difficult or impractical to use in tests, especially when they involve:
+   - **Network Requests**: The dependency may involve external APIs that are unreliable or slow.
+   - **Databases**: Using a real database can make the tests slow, flaky, and difficult to configure.
+   - **Hardware or Services**: The dependency might involve hardware, third-party services, or other complex systems.
+3. **Control the Test Environment**: Mocking allows you to provide **controlled inputs** and **responses** for the dependencies, ensuring that the tests are **deterministic** (i.e., they produce the same results every time). This allows the tests to be more reliable and repeatable.
+4. **Simulate Edge Cases**: Mocking can simulate **edge cases** that might be difficult to reproduce with real dependencies. For example, you can mock an API call to simulate network errors, timeouts, or different HTTP response codes.
+5. **Track Interactions**: Mocks allow you to **verify interactions** with dependencies. You can check if a method was called, how many times it was called, or with what parameters. This helps ensure that the unit interacts with its dependencies correctly.
+
+### Types of Test Doubles
+There are different types of **test doubles** used in unit testing to replace real dependencies:
+
+1. **Mock**: A **mock** is a fully-fledged object that can simulate behavior, return predefined values, and verify interactions (e.g., method calls, arguments passed).
+2. **Stub**: A **stub** provides **predefined responses** but does not verify interactions. It is used when you need to simulate a specific state or condition.
+3. **Spy**: A **spy** can capture information about calls made to it (e.g., which methods were called and with what parameters). It is often used to **verify interactions**.
+4. **Fake**: A **fake** is a simple implementation of an interface or class that behaves like the real dependency but is simplified (e.g., an in-memory database).
+5. **Dummy**: A **dummy** is a placeholder object that is passed around but is never actually used in the test (often used for satisfying method signatures).
+
+### Example of Mocking in Unit Testing
+Consider a class `WeatherService` that depends on a `NetworkClient` to fetch weather data. The `NetworkClient` communicates with an API, making it a perfect candidate to be mocked during testing.
+
+#### Production Code
+```swift
+protocol NetworkClient {
+    func fetchData(completion: @escaping (Data?, Error?) -> Void)
+}
+
+class RealNetworkClient: NetworkClient {
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        // Real network request logic
+    }
+}
+
+class WeatherService {
+    private let networkClient: NetworkClient
+
+    init(networkClient: NetworkClient) {
+        self.networkClient = networkClient
+    }
+
+    func fetchWeather(completion: @escaping (Weather?) -> Void) {
+        networkClient.fetchData { data, error in
+            if let data = data {
+                // Process data to create Weather object
+                let weather = Weather(data: data)
+                completion(weather)
+            } else {
+                completion(nil)
+            }
+        }
+    }
+}
+```
+
+#### Test Code with Mocking
+To unit test the `WeatherService`, we don't want to make real network requests. Instead, we use a **mock** of `NetworkClient` to simulate responses.
+
+```swift
+import XCTest
+
+class MockNetworkClient: NetworkClient {
+    var shouldReturnError = false
+    var mockData: Data?
+
+    func fetchData(completion: @escaping (Data?, Error?) -> Void) {
+        if shouldReturnError {
+            completion(nil, NSError(domain: "NetworkError", code: 500, userInfo: nil))
+        } else {
+            completion(mockData, nil)
+        }
+    }
+}
+
+class WeatherServiceTests: XCTestCase {
+    func testFetchWeather_Success() {
+        // Arrange
+        let mockClient = MockNetworkClient()
+        let jsonString = """
+        {
+            "temperature": 25,
+            "condition": "Sunny"
+        }
+        """
+        mockClient.mockData = Data(jsonString.utf8)
+        let weatherService = WeatherService(networkClient: mockClient)
+
+        let expectation = self.expectation(description: "Weather data fetched successfully")
+
+        // Act
+        weatherService.fetchWeather { weather in
+            // Assert
+            XCTAssertNotNil(weather)
+            XCTAssertEqual(weather?.temperature, 25)
+            XCTAssertEqual(weather?.condition, "Sunny")
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 2.0)
+    }
+
+    func testFetchWeather_Failure() {
+        // Arrange
+        let mockClient = MockNetworkClient()
+        mockClient.shouldReturnError = true
+        let weatherService = WeatherService(networkClient: mockClient)
+
+        let expectation = self.expectation(description: "Weather data fetch failed")
+
+        // Act
+        weatherService.fetchWeather { weather in
+            // Assert
+            XCTAssertNil(weather)
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 2.0)
+    }
+}
+```
+
+**Explanation**:
+- **MockNetworkClient**:
+  - Implements the `NetworkClient` protocol.
+  - Provides **mock responses** to simulate success and failure scenarios.
+  - This ensures that tests are isolated and do not depend on real network conditions.
+- **WeatherServiceTests**:
+  - Uses **MockNetworkClient** to test `WeatherService`'s behavior under different conditions.
+  - Ensures that the unit under test behaves correctly without relying on real network interactions.
+
+### Benefits of Using Mocks in Unit Testing
+1. **Isolation**: Mocks help isolate the unit under test from other parts of the system, making the test more focused and reliable.
+2. **Speed**: Mocking removes external dependencies that can be slow or unreliable (e.g., network, databases), making the tests faster to execute.
+3. **Control**: Mocks provide fine-grained control over the environment, allowing you to simulate **specific scenarios**, such as network failures, without depending on real conditions.
+4. **Repeatability**: Mocks ensure that tests are repeatable and deterministic by providing **predictable responses**.
+5. **Complexity Reduction**: Testing complex workflows that involve multiple dependencies is simplified by using mocks, which help eliminate unnecessary complexity during testing.
+
+### Tools for Mocking in Swift
+There are several frameworks and libraries available that can make mocking easier in Swift:
+
+1. **Cuckoo**: A popular library for generating mock classes automatically based on protocols or classes.
+2. **Mockingbird**: Another mocking library that allows for easy mock and spy creation for Swift projects.
+3. **Quick and Nimble**: Although not specifically for mocking, they pair well with mocking frameworks to create expressive tests.
+
+### When to Use Mocking
+- **Network Calls**: To avoid making real API calls during unit tests.
+- **Database Interactions**: To avoid dealing with real databases, which can be time-consuming and unreliable for unit tests.
+- **Hardware or External Services**: When dealing with hardware devices or external services like file systems, payment gateways, or third-party APIs.
+- **Complex Dependencies**: When a class has many dependencies or external connections, mocking simplifies testing and focuses on the class's behavior.
+
+### Summary
+- **Mocking** is a testing technique used to simulate the behavior of real objects in a controlled way, making tests more isolated, predictable, and faster.
+- **Why Mocking is Used**:
+  - **Isolation** of the unit under test from its dependencies.
+  - **Controlled Environment** for more deterministic tests.
+  - **Simplify Complex Dependencies** like network calls or databases.
+  - **Test Edge Cases** that are difficult to reproduce using real dependencies.
+- **Mock vs. Stub vs. Spy**:
+  - A **mock** simulates behavior, provides responses, and can verify interactions.
+  - A **stub** provides static, predefined responses without tracking method calls.
+  - A **spy** tracks method invocations and arguments but is typically used to verify interactions.
+
+By using mocking effectively in unit tests, you can **improve test reliability**, **reduce complexity**, and ensure that your unit tests are more focused and easier to maintain.
+</details>
+
+<details>
+  <summary>When to use Stubs</summary>
+  **Stubs** are used in **unit testing** to provide **predefined responses** for dependencies that are not the primary focus of the test. A stub is a simple implementation that returns hard-coded data and does not contain any actual business logic. Stubs are useful when you need to simulate specific conditions without verifying interactions between objects.
+
+Here are some scenarios when **stubs** are commonly used:
+
+### 1. To Simulate Specific Responses
+Stubs are used when you need to simulate a **specific response** from a dependency in order to test your unit’s behavior under controlled conditions. This helps you verify how the unit behaves when certain data is returned by the dependency.
+
+**Example**:
+- Suppose you have a method that relies on an external **API call** to fetch user data. Using a stub, you can return a specific **hardcoded response** (e.g., a JSON object) to test how your code handles this data.
+- In this scenario, a stub is used to ensure that you receive a consistent response, without making real network requests.
+
+### 2. To Eliminate External Dependencies
+Stubs are used to replace real dependencies with simplified implementations. This helps ensure that unit tests are **isolated** and **fast**, without involving complex external systems like:
+
+- **Databases**: Stubs can replace database queries with predefined responses, ensuring that tests are faster and isolated from database state.
+- **Network Services**: Instead of making actual network requests, stubs can return predefined data or simulate errors.
+
+**Example**:
+- If you are testing a service that needs to **store data in a database**, you can use a stubbed database to avoid the overhead and unpredictability of interacting with a real database.
+
+### 3. When Testing Edge Cases
+Stubs are helpful for simulating **edge cases** or **error conditions** that may be difficult to reproduce with the real dependency.
+
+**Example**:
+- If you are testing how your code handles a **network timeout** or a **server error**, you can create a stub to simulate these situations. The stub can return an error or a specific status code to verify that your unit handles these conditions gracefully.
+
+### 4. When the Dependency Is Not Yet Implemented
+In the early stages of development, the real dependency might not yet be available. You can use a stub to **simulate** the behavior of that dependency so that you can continue writing and testing other parts of your system.
+
+**Example**:
+- Suppose you are building a module that depends on a third-party **payment service**, and that service is still under development. A stub can be used to simulate the service’s behavior so you can proceed with testing your module’s logic.
+
+### 5. To Provide Static, Fixed Responses
+Stubs are often used when you need to **provide a static or fixed response** for a dependency. Since a stub has predefined behavior, it is useful for situations where the same response is expected each time.
+
+**Example**:
+- If you have a method that needs a **configurable setting**, you can use a stub to return a specific configuration value, which will remain fixed and predictable.
+
+### 6. To Avoid Flaky Tests
+Real dependencies can sometimes introduce **flakiness** in tests due to their unpredictability (e.g., changing database state or network conditions). Stubs provide consistent behavior, making your tests more **reliable**.
+
+**Example**:
+- Suppose you are testing a module that sends an HTTP request. The real dependency could introduce **network delays** or **intermittent failures**. Using a stub helps you avoid flaky tests and ensures that each test run has the same consistent result.
+
+### Stub vs. Mock
+- **Stub**: Provides predefined outputs for specific methods but does not verify that the method was called or track interactions.
+- **Mock**: Can simulate behavior, provide predefined outputs, and also **verify interactions**, such as whether a method was called, how many times, and with what parameters.
+
+**When to Use Stubs Instead of Mocks**:
+- Use **stubs** when you just need a **specific output** from a dependency to test how your unit behaves with it.
+- Use **mocks** when you need to **verify** that a dependency is called in a particular way or when interactions between components need to be validated.
+
+### Example of Using a Stub in Unit Testing
+Consider a `WeatherService` that depends on a `LocationService` to get the current location. The `LocationService` might be unpredictable because it depends on the availability of GPS or network, so we will use a **stub**.
+
+#### Production Code
+```swift
+protocol LocationService {
+    func getCurrentLocation() -> Location?
+}
+
+class WeatherService {
+    private let locationService: LocationService
+
+    init(locationService: LocationService) {
+        self.locationService = locationService
+    }
+
+    func getWeather() -> String {
+        guard let location = locationService.getCurrentLocation() else {
+            return "Unable to get location"
+        }
+        return "Weather for \(location.city)"
+    }
+}
+```
+
+#### Test Code Using a Stub
+```swift
+class StubLocationService: LocationService {
+    var location: Location?
+
+    func getCurrentLocation() -> Location? {
+        return location
+    }
+}
+
+class WeatherServiceTests: XCTestCase {
+    func testGetWeather_WithValidLocation() {
+        // Arrange
+        let stubLocationService = StubLocationService()
+        stubLocationService.location = Location(city: "London")
+        let weatherService = WeatherService(locationService: stubLocationService)
+
+        // Act
+        let weather = weatherService.getWeather()
+
+        // Assert
+        XCTAssertEqual(weather, "Weather for London")
+    }
+
+    func testGetWeather_WithNoLocation() {
+        // Arrange
+        let stubLocationService = StubLocationService()
+        stubLocationService.location = nil
+        let weatherService = WeatherService(locationService: stubLocationService)
+
+        // Act
+        let weather = weatherService.getWeather()
+
+        // Assert
+        XCTAssertEqual(weather, "Unable to get location")
+    }
+}
+```
+
+**Explanation**:
+- **StubLocationService**:
+  - Implements the `LocationService` protocol.
+  - Provides static data for the `getCurrentLocation()` method.
+- In the **testGetWeather_WithValidLocation** test, the `StubLocationService` returns a location with the city `"London"`.
+- In the **testGetWeather_WithNoLocation** test, the `StubLocationService` returns `nil` to simulate the scenario where no location is available.
+
+### Summary of When to Use Stubs
+1. **Simulate Specific Responses**: Use stubs to provide controlled, specific responses from dependencies.
+2. **Eliminate External Dependencies**: Replace complex or unpredictable external dependencies (e.g., network services, databases).
+3. **Test Edge Cases**: Test how your code behaves with edge cases or error conditions that are difficult to reproduce with real dependencies.
+4. **When Dependencies Are Not Implemented**: Use stubs to simulate dependencies that are under development.
+5. **Provide Static Responses**: Use stubs for dependencies where a consistent, static response is required.
+6. **Avoid Flaky Tests**: Use stubs to ensure predictable behavior and avoid flakiness in tests caused by real dependencies.
+
+**Stubs** are invaluable in unit testing to ensure tests remain **fast**, **reliable**, and **consistent** by providing fixed responses for specific dependencies. They help keep the tests focused on the unit under test, avoiding complexities introduced by real dependencies.
+</details>
+
+<details>
+  <summary>When to use Spies?</summary>
+  **Spies** are a type of **test double** used in unit testing to verify interactions between objects, such as which methods are called, how many times they are called, and with what parameters. A **spy** captures and records information about the interactions with the object under test, allowing you to validate behavior that involves interactions with **dependencies**.
+
+Here are scenarios where using **spies** is especially beneficial:
+
+### 1. **Verify Method Calls and Interactions**
+Spies are used when you need to **verify that certain methods are called** during the execution of the code under test. This is particularly useful when you want to ensure that the **unit interacts with its dependencies** correctly.
+
+**Example**:
+- If your `OrderService` class has to **notify** a payment gateway when an order is completed, you can use a spy to verify that the `processPayment()` method was called when placing an order.
+
+**Use Case**:
+- To validate that an event, such as an **API request**, a **database call**, or a **notification**, has been correctly triggered in response to specific actions.
+
+### 2. **Test the Number of Times a Method Was Called**
+If you need to verify how many times a particular method was called, a spy is an excellent tool. It records the number of times a method is invoked and allows you to make assertions about it.
+
+**Example**:
+- Suppose you have a retry mechanism that should attempt to **connect** to a service up to three times. You can use a spy to verify that the retry method is called the correct number of times if the service is unavailable.
+
+**Use Case**:
+- To ensure that certain behaviors, such as **logging** or **error handling**, are being performed the expected number of times.
+
+### 3. **Verify Method Arguments**
+Spies allow you to verify that a method was called with the **expected arguments**. This is useful when the correctness of the parameters is essential to the test.
+
+**Example**:
+- If you have a `UserNotifier` class that sends notifications, you might want to verify that the correct **user ID** and **message** are passed to the `sendNotification()` method. A spy can capture the method arguments to check that they match what is expected.
+
+**Use Case**:
+- To validate that the dependencies receive the correct data from the unit under test, especially in complex systems where the interactions depend heavily on input values.
+
+### 4. **Test Interactions Between Collaborators**
+When testing a class that interacts with multiple **collaborator objects** (dependencies), a spy helps you verify whether those interactions occur correctly. This is particularly useful in **controller** or **service** classes where orchestration between multiple dependencies is key.
+
+**Example**:
+- If you have a `BookingManager` that interacts with a `PaymentService` and a `NotificationService`, you could use spies to verify that the correct sequence of interactions occurs, such as `processPayment()` followed by `sendBookingConfirmation()`.
+
+**Use Case**:
+- To ensure the correct **order of operations** in complex workflows where multiple services are involved.
+
+### 5. **Test Side Effects of a Method**
+Spies are useful to verify **side effects** that result from the method under test, particularly when the method interacts with other classes in ways that are not immediately visible in the return value.
+
+**Example**:
+- If a method is supposed to **log an error** under certain conditions, a spy can be used to ensure that the logging method is called when an error occurs.
+
+**Use Case**:
+- To validate that the correct **actions are taken** (e.g., sending an email, logging an error) as a result of executing a specific method.
+
+### Example of Using a Spy in Unit Testing
+Consider a `UserService` that depends on a `Logger` to log user actions. You want to test whether `Logger` is called when a user performs an action.
+
+#### Production Code
+```swift
+protocol Logger {
+    func log(message: String)
+}
+
+class UserService {
+    private let logger: Logger
+
+    init(logger: Logger) {
+        self.logger = logger
+    }
+
+    func performAction() {
+        // Perform some user action
+        logger.log(message: "User performed an action")
+    }
+}
+```
+
+#### Test Code Using a Spy
+To verify that the `log(message:)` method was called with the correct message, we create a **spy**.
+
+```swift
+import XCTest
+
+class SpyLogger: Logger {
+    var logMessages: [String] = []
+
+    func log(message: String) {
+        logMessages.append(message)
+    }
+}
+
+class UserServiceTests: XCTestCase {
+    func testPerformAction_ShouldLogMessage() {
+        // Arrange
+        let spyLogger = SpyLogger()
+        let userService = UserService(logger: spyLogger)
+
+        // Act
+        userService.performAction()
+
+        // Assert
+        XCTAssertEqual(spyLogger.logMessages.count, 1)
+        XCTAssertEqual(spyLogger.logMessages.first, "User performed an action")
+    }
+}
+```
+
+**Explanation**:
+- **SpyLogger**:
+  - Implements the `Logger` protocol.
+  - Captures all log messages in an array.
+- **UserServiceTests**:
+  - Uses `SpyLogger` to verify that `performAction()` correctly logs a message.
+  - **Assertions**:
+    - Verifies that the `log(message:)` method is called **exactly once**.
+    - Verifies that the logged message matches the expected value (`"User performed an action"`).
+
+### Summary of When to Use Spies
+1. **Verify Method Calls and Interactions**: Ensure that certain methods are called during code execution.
+2. **Test the Number of Times a Method Was Called**: Validate that a method is called a specific number of times, such as during retries.
+3. **Verify Method Arguments**: Check that methods are called with the correct arguments.
+4. **Test Interactions Between Collaborators**: Verify the interactions and order of operations between multiple dependencies.
+5. **Test Side Effects of a Method**: Confirm that side effects such as logging or notifications occur as expected.
+
+**Spies** are particularly useful in unit testing to verify **how** a unit interacts with its dependencies. They help ensure that a class or function behaves correctly in terms of the **number of method invocations**, the **arguments passed**, and the **order of interactions**. By using spies, you can gain confidence that the system's internal interactions are functioning as expected, beyond just verifying the output.
+  
+</details>
+
+### Core Data Tests
+<details>
+  <summary>How do you write unit tests for Core Data?</summary>
+  Writing **unit tests for Core Data** can be challenging because Core Data typically interacts with a persistent store, making it less predictable and harder to isolate. However, by following specific strategies and best practices, you can make Core Data unit tests **effective, fast, and reliable**.
+
+Here are the steps and techniques to write unit tests for **Core Data**:
+
+### 1. **Use an In-Memory Persistent Store**
+To make unit tests **faster** and **more predictable**, use an **in-memory store** instead of writing data to a disk. An in-memory store simulates the persistent store entirely in memory, meaning it will not leave any data behind after the test completes, making your tests **self-contained** and **repeatable**.
+
+#### Example of Setting Up an In-Memory Store
+To create an in-memory version of the persistent store, configure your `NSPersistentContainer` or `NSPersistentStoreCoordinator` accordingly.
+
+```swift
+import CoreData
+import XCTest
+
+class CoreDataTests: XCTestCase {
+    var persistentContainer: NSPersistentContainer!
+
+    override func setUp() {
+        super.setUp()
+
+        // Set up the in-memory persistent container
+        persistentContainer = NSPersistentContainer(name: "ModelName")
+        let description = NSPersistentStoreDescription()
+        description.type = NSInMemoryStoreType
+        persistentContainer.persistentStoreDescriptions = [description]
+
+        persistentContainer.loadPersistentStores { (description, error) in
+            if let error = error {
+                fatalError("Failed to load in-memory store: \(error)")
+            }
+        }
+    }
+
+    override func tearDown() {
+        persistentContainer = nil
+        super.tearDown()
+    }
+
+    // Your unit tests go here...
+}
+```
+
+**Explanation**:
+- **`NSPersistentContainer(name:)`** initializes the persistent container with your data model.
+- **`NSInMemoryStoreType`** makes sure that the data is stored only in memory and not on disk.
+- **`loadPersistentStores`** loads the in-memory store, allowing you to use Core Data without affecting persistent storage.
+
+### 2. **Create a Dedicated Context for Each Test**
+Each test should have its own **NSManagedObjectContext** to ensure **isolation**. This prevents data in one test from affecting other tests, making the tests **independent** and **deterministic**.
+
+```swift
+func makeTestContext() -> NSManagedObjectContext {
+    let context = persistentContainer.newBackgroundContext()
+    return context
+}
+```
+
+**Explanation**:
+- **`newBackgroundContext()`** creates a new instance of `NSManagedObjectContext`. This ensures that each test can use a unique context.
+- Using **isolated contexts** prevents shared state between tests, which is crucial for making unit tests reliable.
+
+### 3. **Write Unit Tests for Core Data Operations**
+You can then use the in-memory context to perform Core Data operations, such as creating, updating, deleting, and querying entities. The key is to ensure that every test **sets up** the initial state, **performs actions**, and **validates** the expected outcomes.
+
+#### Example Unit Test: Creating an Entity
+Here is an example of testing how an entity is saved to the context:
+
+```swift
+func testCreateUserEntity() {
+    // Arrange
+    let context = makeTestContext()
+    let user = User(context: context)
+    user.name = "Alice"
+    user.age = 30
+
+    // Act
+    do {
+        try context.save()
+    } catch {
+        XCTFail("Failed to save context: \(error)")
+    }
+
+    // Assert
+    let fetchRequest: NSFetchRequest<User> = User.fetchRequest()
+    do {
+        let results = try context.fetch(fetchRequest)
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.name, "Alice")
+        XCTAssertEqual(results.first?.age, 30)
+    } catch {
+        XCTFail("Failed to fetch User: \(error)")
+    }
+}
+```
+
+**Explanation**:
+- **Arrange**: Set up the test by creating a new `User` entity.
+- **Act**: Save the context to persist the user data.
+- **Assert**: Fetch the saved `User` and verify that the data is correct.
+
+### 4. **Testing Fetch Requests**
+To test a **fetch request**, create the entities required for the test, save them, and then perform the fetch request.
+
+**Example**:
+```swift
+func testFetchUserByName() {
+    // Arrange
+    let context = makeTestContext()
+    let user1 = User(context: context)
+    user1.name = "Alice"
+    let user2 = User(context: context)
+    user2.name = "Bob"
+    try! context.save()
+
+    // Act
+    let fetchRequest: NSFetchRequest<User> = User.fetchRequest()
+    fetchRequest.predicate = NSPredicate(format: "name == %@", "Alice")
+    let fetchedUsers = try! context.fetch(fetchRequest)
+
+    // Assert
+    XCTAssertEqual(fetchedUsers.count, 1)
+    XCTAssertEqual(fetchedUsers.first?.name, "Alice")
+}
+```
+
+**Explanation**:
+- You can use **predicates** to filter the fetch request, and then verify the filtered results.
+
+### 5. **Testing Entity Updates**
+Unit tests can also verify whether an entity is updated correctly.
+
+**Example**:
+```swift
+func testUpdateUserEntity() {
+    // Arrange
+    let context = makeTestContext()
+    let user = User(context: context)
+    user.name = "Alice"
+    user.age = 30
+    try! context.save()
+
+    // Act
+    user.age = 31
+    try! context.save()
+
+    // Assert
+    let fetchRequest: NSFetchRequest<User> = User.fetchRequest()
+    let results = try! context.fetch(fetchRequest)
+    XCTAssertEqual(results.count, 1)
+    XCTAssertEqual(results.first?.age, 31)
+}
+```
+
+**Explanation**:
+- You create the user, update a property (`age`), save again, and verify that the update was successful.
+
+### 6. **Testing Entity Deletion**
+To test entity deletion, add an entity, save it, delete it, and then confirm that it no longer exists.
+
+**Example**:
+```swift
+func testDeleteUserEntity() {
+    // Arrange
+    let context = makeTestContext()
+    let user = User(context: context)
+    user.name = "Alice"
+    try! context.save()
+
+    // Act
+    context.delete(user)
+    try! context.save()
+
+    // Assert
+    let fetchRequest: NSFetchRequest<User> = User.fetchRequest()
+    let results = try! context.fetch(fetchRequest)
+    XCTAssertEqual(results.count, 0)
+}
+```
+
+**Explanation**:
+- Add an entity, save it, delete it, and confirm that it no longer exists.
+
+### 7. **Testing Relationships Between Entities**
+If your Core Data model has **relationships** between entities, you should also write tests to verify that these relationships are properly set up and maintained.
+
+**Example**:
+```swift
+func testUserHasPostsRelationship() {
+    // Arrange
+    let context = makeTestContext()
+    let user = User(context: context)
+    user.name = "Alice"
+    let post = Post(context: context)
+    post.title = "Core Data Testing"
+    user.addToPosts(post)
+    try! context.save()
+
+    // Act
+    let fetchRequest: NSFetchRequest<User> = User.fetchRequest()
+    fetchRequest.predicate = NSPredicate(format: "name == %@", "Alice")
+    let fetchedUser = try! context.fetch(fetchRequest).first
+
+    // Assert
+    XCTAssertEqual(fetchedUser?.posts?.count, 1)
+    XCTAssertEqual((fetchedUser?.posts?.anyObject() as? Post)?.title, "Core Data Testing")
+}
+```
+
+**Explanation**:
+- **Relationships** between entities are tested to ensure that references are correctly established.
+
+### 8. **Using Mocks and Stubs for Core Data**
+To further isolate unit tests, you can create **mock objects** for the `NSManagedObjectContext` or even use **mock frameworks** to simulate Core Data interactions. This helps verify the interaction logic without using a real store or database.
+
+However, this approach is more useful for testing the **interaction with Core Data APIs** rather than verifying persistence.
+
+### Best Practices for Testing Core Data
+1. **Use In-Memory Store**: Use **NSInMemoryStoreType** to avoid using the disk and ensure tests are fast and clean.
+2. **Set Up and Tear Down Properly**: Use the `setUp()` and `tearDown()` methods to set up the persistent container and clean up resources after each test.
+3. **Isolate Tests**: Make sure that each test runs with a **fresh managed object context** to avoid unintended state sharing.
+4. **Verify Relationships**: Test the integrity of relationships between entities to ensure that the data model behaves as expected.
+5. **Error Handling**: Always test **error scenarios** such as failed saves or invalid data to ensure your code handles these situations gracefully.
+
+### Summary
+- **In-Memory Store**: Use an in-memory store to make tests fast and ensure that no data persists between test runs.
+- **Create Isolated Contexts**: Create a fresh `NSManagedObjectContext` for each test to maintain independence.
+- **Test CRUD Operations**: Write tests for creating, reading, updating, and deleting entities to verify all operations work correctly.
+- **Test Relationships**: If entities have relationships, test those to ensure relationships are correctly maintained.
+- **Best Practices**: Ensure proper setup and teardown, isolate tests, and verify both successful operations and error conditions.
+
+By following these practices, you can ensure that your **Core Data** unit tests are effective, reliable, and maintainable, providing confidence in the functionality of your Core Data implementation.
+</details>
+
+### Alamofire
+<details>
+  <summary>How do you handle testing when using a third-party networking library like Alamofire?</summary>
+  When using a **third-party networking library** like **Alamofire** for network requests in your iOS application, testing can be challenging because it involves dealing with asynchronous network calls and external APIs. However, you can handle testing effectively by following certain strategies, such as using **mocking**, **dependency injection**, and leveraging **testing utilities** that Alamofire provides.
+
+Here are key strategies and best practices for handling testing with **Alamofire**:
+
+### 1. **Dependency Injection**
+To ensure that your tests are isolated, use **dependency injection** to inject Alamofire-related dependencies. This allows you to replace actual network calls with mocked services during unit testing.
+
+**Example**:
+- Instead of tightly coupling Alamofire within your service, abstract the network layer using a protocol.
+
+```swift
+import Alamofire
+
+// Define a protocol that abstracts the network service
+protocol NetworkService {
+    func request(_ url: String, completion: @escaping (Result<Data, Error>) -> Void)
+}
+
+// Actual implementation using Alamofire
+class AlamofireNetworkService: NetworkService {
+    func request(_ url: String, completion: @escaping (Result<Data, Error>) -> Void) {
+        AF.request(url).response { response in
+            if let data = response.data {
+                completion(.success(data))
+            } else if let error = response.error {
+                completion(.failure(error))
+            }
+        }
+    }
+}
+```
+
+- You can then inject `AlamofireNetworkService` into your service classes, making it easy to replace with a mock during testing.
+
+### 2. **Create a Mock Network Service**
+Create a **mock implementation** of the `NetworkService` protocol for use in unit tests. This allows you to control the responses without making actual network requests.
+
+**Example**:
+```swift
+class MockNetworkService: NetworkService {
+    var mockResponse: Result<Data, Error>?
+
+    func request(_ url: String, completion: @escaping (Result<Data, Error>) -> Void) {
+        if let response = mockResponse {
+            completion(response)
+        }
+    }
+}
+
+// Unit Test Example
+import XCTest
+
+class NetworkTests: XCTestCase {
+    var networkService: MockNetworkService!
+
+    override func setUp() {
+        super.setUp()
+        networkService = MockNetworkService()
+    }
+
+    func testSuccessfulResponse() {
+        // Arrange
+        let expectedData = Data("Mock data".utf8)
+        networkService.mockResponse = .success(expectedData)
+
+        let expectation = self.expectation(description: "Data received")
+
+        // Act
+        networkService.request("https://example.com") { result in
+            // Assert
+            switch result {
+            case .success(let data):
+                XCTAssertEqual(data, expectedData)
+                expectation.fulfill()
+            case .failure:
+                XCTFail("Expected success but got failure")
+            }
+        }
+
+        wait(for: [expectation], timeout: 2.0)
+    }
+}
+```
+
+**Explanation**:
+- **MockNetworkService** allows you to provide predefined responses (`mockResponse`).
+- This approach ensures you have **complete control** over the data that is returned, making your tests **repeatable** and **deterministic**.
+
+### 3. **Using OHHTTPStubs to Stub Network Requests**
+**OHHTTPStubs** is a popular library used to **stub network requests** and simulate different responses for testing. It allows you to intercept Alamofire requests and provide **custom responses**.
+
+**Example**:
+```swift
+import XCTest
+import Alamofire
+import OHHTTPStubs
+import OHHTTPStubsSwift
+
+class AlamofireTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // Set up stubs to intercept requests
+        stub(condition: isHost("example.com")) { _ in
+            let stubData = "Mock response".data(using: .utf8)!
+            return HTTPStubsResponse(data: stubData, statusCode: 200, headers: nil)
+        }
+    }
+
+    override func tearDown() {
+        // Remove all stubs
+        HTTPStubs.removeAllStubs()
+        super.tearDown()
+    }
+
+    func testAlamofireRequest_WithStub() {
+        // Arrange
+        let expectation = self.expectation(description: "Data received")
+
+        // Act
+        AF.request("https://example.com")
+            .response { response in
+                // Assert
+                XCTAssertNotNil(response.data)
+                XCTAssertEqual(String(data: response.data!, encoding: .utf8), "Mock response")
+                expectation.fulfill()
+            }
+
+        wait(for: [expectation], timeout: 5.0)
+    }
+}
+```
+
+**Explanation**:
+- **OHHTTPStubs** intercepts any network request that matches a given condition (`isHost("example.com")`).
+- The stub then returns **mock data** (`"Mock response"`), allowing you to test how your code handles the response without making real network calls.
+
+### 4. **Using Alamofire's Built-In Request Adapter and Interceptor**
+**Alamofire** provides **request interceptors** that you can use to modify or replace network requests. You can use this feature for testing by intercepting requests and injecting **mock responses**.
+
+**Example**:
+```swift
+import Alamofire
+
+class MockRequestInterceptor: RequestInterceptor {
+    var mockResponse: Data?
+
+    func adapt(_ urlRequest: URLRequest, for session: Session, completion: @escaping (Result<URLRequest, Error>) -> Void) {
+        completion(.success(urlRequest))
+    }
+
+    func retry(_ request: Request, for session: Session, dueTo error: Error, completion: @escaping (RetryResult) -> Void) {
+        completion(.doNotRetry)
+    }
+
+    func response(for request: URLRequest, completion: @escaping (DataResponse<Data?, AFError>) -> Void) {
+        if let mockResponse = mockResponse {
+            let response = DataResponse(request: request, response: nil, data: mockResponse, metrics: nil, serializationDuration: 0, result: .success(mockResponse))
+            completion(response)
+        } else {
+            completion(DataResponse(request: request, response: nil, data: nil, metrics: nil, serializationDuration: 0, result: .failure(AFError.sessionTaskFailed(error: URLError(.badServerResponse)))))
+        }
+    }
+}
+```
+
+### 5. **Test Alamofire with Combine**
+If your application uses **Combine** with Alamofire, you can use **XCTestExpectation** or **Combine’s built-in testing operators** to write unit tests.
+
+**Example**:
+```swift
+import XCTest
+import Alamofire
+import Combine
+
+class AlamofireCombineTests: XCTestCase {
+    var cancellables = Set<AnyCancellable>()
+
+    func testAlamofirePublisher() {
+        // Arrange
+        let expectation = self.expectation(description: "Combine publisher should emit value")
+        let publisher = AF.request("https://example.com")
+            .publishData()
+            .value()
+
+        // Act
+        publisher
+            .sink(receiveCompletion: { completion in
+                switch completion {
+                case .finished:
+                    break
+                case .failure(let error):
+                    XCTFail("Request failed with error: \(error)")
+                }
+            }, receiveValue: { data in
+                // Assert
+                XCTAssertNotNil(data)
+                expectation.fulfill()
+            })
+            .store(in: &cancellables)
+
+        // Wait for the expectation to be fulfilled
+        wait(for: [expectation], timeout: 5.0)
+    }
+}
+```
+
+**Explanation**:
+- **`publishData()`**: Converts the Alamofire request to a Combine publisher.
+- The test waits for the **published value** and then asserts the result.
+
+### 6. **Mocking URLSession with Alamofire**
+If your Alamofire instance is configured to use a custom **URLSession**, you can mock the `URLSession` to intercept and return mock responses. This approach is useful if you want to **mimic network conditions** or **control the data** being returned by Alamofire without using third-party tools like OHHTTPStubs.
+
+**Example**:
+- Create a custom URL protocol to intercept requests.
+- Inject the `URLSession` configured with the mock protocol into Alamofire.
+
+```swift
+import XCTest
+import Alamofire
+
+class MockURLProtocol: URLProtocol {
+    static var mockData: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        return true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        return request
+    }
+
+    override func startLoading() {
+        if let mockData = MockURLProtocol.mockData {
+            self.client?.urlProtocol(self, didLoad: mockData)
+        }
+        self.client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+// Usage in Unit Test
+class MockURLSessionTests: XCTestCase {
+    var session: Session!
+
+    override func setUp() {
+        super.setUp()
+        let configuration = URLSessionConfiguration.default
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        session = Session(session: urlSession)
+    }
+
+    func testRequest_WithMockResponse() {
+        // Arrange
+        let expectation = self.expectation(description: "Data received")
+        MockURLProtocol.mockData = Data("Mock response".utf8)
+
+        // Act
+        session.request("https://example.com").response { response in
+            // Assert
+            XCTAssertNotNil(response.data)
+            XCTAssertEqual(String(data: response.data!, encoding: .utf8), "Mock response")
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 5.0)
+    }
+}
+```
+
+**Explanation**:
+- **MockURLProtocol** intercepts requests and returns **mock data**.
+- **URLSessionConfiguration** is set up with **MockURLProtocol** and injected into Alamofire.
+
+### Summary of Best Practices
+1. **Use Dependency Injection**: Abstract Alamofire using protocols so you can inject mock network services during testing.
+2. **Mocking with Custom Implementations**: Create mock classes that provide controlled responses.
+3. **Stub Network Requests with OHHTTPStubs**: Use OHHTTPStubs to intercept Alamofire network calls and provide simulated responses.
+4. **Mock URLSession**: Use `URLProtocol` to intercept requests and provide mock data when using custom URLSession configurations.
+5. **Use Combine and XCTestExpectation**: If you are using Combine, handle asynchronous responses using Combine publishers, `sink`, and `XCTestExpectation` to manage test flow.
+
+By applying these strategies, you can effectively test your networking code while using Alamofire. This ensures that your tests are **isolated**, **reliable**, and **independent** of real network conditions.
+</details>
